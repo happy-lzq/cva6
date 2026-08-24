@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+CVA6_ROOT=/home/lzq/cva6/cva6-deepflowfuzz
+CVA6_IMAGE=cva6-deepflowfuzz:base
+
+exec docker run --rm -it \
+  --name cva6 \
+  --hostname cva6 \
+  --shm-size=16g \
+  -e HOME=/home/lzq \
+  -e TERM="${TERM:-xterm-256color}" \
+  -e COLORTERM="${COLORTERM:-truecolor}" \
+  -e NUM_JOBS="${NUM_JOBS:-32}" \
+  -v "${CVA6_ROOT}:/workspace/cva6:rw" \
+  -w /workspace/cva6 \
+  "${CVA6_IMAGE}" \
+  bash --rcfile /workspace/cva6/container/cva6-env.sh -i

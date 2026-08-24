@@ -1934,6 +1934,148 @@ module cva6
 
   );
 
+`ifdef DFZ_TRACE
+  // -------------------------------------------------------------------------
+  // DeepFlowFuzz dynamic identity and coarse G0/L1 performing-location trace.
+  // This observation cone is excluded from normal builds and never feeds RTL.
+  // -------------------------------------------------------------------------
+  logic dfz_if_accept;
+  logic dfz_issue_fire;
+  logic [CVA6Cfg.NR_SB_ENTRIES-1:0] dfz_slot_issued;
+  logic [CVA6Cfg.NR_SB_ENTRIES-1:0] dfz_slot_result_valid;
+  logic [CVA6Cfg.NR_SB_ENTRIES-1:0] dfz_slot_exception;
+  logic [CVA6Cfg.NR_SB_ENTRIES-1:0][CVA6Cfg.VLEN-1:0] dfz_slot_pc;
+  logic [CVA6Cfg.NR_SB_ENTRIES-1:0][3:0] dfz_slot_fu;
+  logic [CVA6Cfg.NR_SB_ENTRIES-1:0][7:0] dfz_slot_op;
+  logic [CVA6Cfg.NrWbPorts-1:0] dfz_wb_exception;
+  logic [CVA6Cfg.NrWbPorts-1:0] dfz_wb_exception_timing;
+  logic [CVA6Cfg.NrWbPorts-1:0][CVA6Cfg.XLEN-1:0] dfz_wb_cause;
+  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.TRANS_ID_BITS-1:0] dfz_commit_slot;
+  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.VLEN-1:0] dfz_commit_pc;
+  logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.XLEN-1:0] dfz_commit_data;
+  logic [31:0] dfz_flush_reason;
+
+  assign dfz_if_accept = fetch_valid_if_id[0] && fetch_ready_id_if[0] && !flush_ctrl_if;
+  assign dfz_issue_fire = issue_entry_valid_id_issue[0] && issue_instr_issue_id[0] &&
+                          !flush_unissued_instr_ctrl_id;
+
+  for (genvar dfz_s = 0; dfz_s < CVA6Cfg.NR_SB_ENTRIES; dfz_s++) begin : gen_dfz_sb
+    assign dfz_slot_issued[dfz_s] = issue_stage_i.i_scoreboard.mem_q[dfz_s].issued;
+    assign dfz_slot_result_valid[dfz_s] = issue_stage_i.i_scoreboard.mem_q[dfz_s].sbe.valid;
+    assign dfz_slot_exception[dfz_s] = issue_stage_i.i_scoreboard.mem_q[dfz_s].sbe.ex.valid;
+    assign dfz_slot_pc[dfz_s] = issue_stage_i.i_scoreboard.mem_q[dfz_s].sbe.pc;
+    assign dfz_slot_fu[dfz_s] = issue_stage_i.i_scoreboard.mem_q[dfz_s].sbe.fu;
+    assign dfz_slot_op[dfz_s] = issue_stage_i.i_scoreboard.mem_q[dfz_s].sbe.op;
+  end
+
+  for (genvar dfz_w = 0; dfz_w < CVA6Cfg.NrWbPorts; dfz_w++) begin : gen_dfz_wb
+    assign dfz_wb_exception[dfz_w] = ex_ex_ex_id[dfz_w].valid;
+    assign dfz_wb_exception_timing[dfz_w] = ex_ex_ex_id[dfz_w].timing;
+    assign dfz_wb_cause[dfz_w] = ex_ex_ex_id[dfz_w].cause;
+  end
+
+  for (genvar dfz_c = 0; dfz_c < CVA6Cfg.NrCommitPorts; dfz_c++) begin : gen_dfz_commit
+    assign dfz_commit_slot[dfz_c] = commit_instr_id_commit[dfz_c].trans_id;
+    assign dfz_commit_pc[dfz_c] = commit_instr_id_commit[dfz_c].pc;
+    assign dfz_commit_data[dfz_c] = commit_instr_id_commit[dfz_c].result;
+  end
+
+  always_comb begin
+    dfz_flush_reason = '0;
+    dfz_flush_reason[0] = resolved_branch.is_mispredict;
+    dfz_flush_reason[1] = ex_commit.valid;
+    dfz_flush_reason[2] = eret;
+    dfz_flush_reason[3] = set_debug_pc;
+    dfz_flush_reason[4] = flush_csr_ctrl;
+    dfz_flush_reason[5] = flush_commit;
+    dfz_flush_reason[6] = fence_i_commit_controller;
+    dfz_flush_reason[7] = fence_commit_controller;
+    dfz_flush_reason[8] = sfence_vma_commit_controller;
+    dfz_flush_reason[9] = hfence_vvma_commit_controller;
+    dfz_flush_reason[10] = hfence_gvma_commit_controller;
+    dfz_flush_reason[11] = flush_acc;
+  end
+
+  dfz_trace_monitor #(
+      .VLEN(CVA6Cfg.VLEN),
+      .XLEN(CVA6Cfg.XLEN),
+      .NR_SB_ENTRIES(CVA6Cfg.NR_SB_ENTRIES),
+      .NR_WB_PORTS(CVA6Cfg.NrWbPorts),
+      .NR_COMMIT_PORTS(CVA6Cfg.NrCommitPorts),
+      .TRANS_ID_BITS(CVA6Cfg.TRANS_ID_BITS)
+  ) i_dfz_trace_monitor (
+      .clk_i,
+      .rst_ni,
+      .hart_id_i,
+      .if_accept_i(dfz_if_accept),
+      .if_pc_i(fetch_entry_if_id[0].address),
+      .if_raw_instr_i(
+        rvfi_is_compressed[0] ?
+            {16'b0, fetch_entry_if_id[0].instruction[15:0]} :
+            fetch_entry_if_id[0].instruction
+      ),
+      .if_expanded_instr_i(id_stage_i.instruction_deco[0]),
+      .if_is_rvc_i(rvfi_is_compressed[0]),
+      .if_exception_i(fetch_entry_if_id[0].ex.valid),
+      .id_valid_i(issue_entry_valid_id_issue[0]),
+      .id_fu_i(issue_entry_id_issue[0].fu),
+      .id_op_i(issue_entry_id_issue[0].op),
+      .id_exception_i(issue_entry_id_issue[0].ex.valid),
+      .id_issue_i(dfz_issue_fire),
+      .issue_slot_i(rvfi_issue_pointer[0]),
+      .sb_full_i(sb_full),
+      .id_fu_busy_i(issue_stage_i.i_issue_read_operands.fu_busy[0]),
+      .id_stall_raw_i(issue_stage_i.i_issue_read_operands.stall_raw[0]),
+      .id_operand_stall_i({
+        issue_stage_i.i_issue_read_operands.stall_rs3[0],
+        issue_stage_i.i_issue_read_operands.stall_rs2[0],
+        issue_stage_i.i_issue_read_operands.stall_rs1[0]
+      }),
+      .id_accel_stall_i(stall_acc_id),
+      .id_cvxif_wait_i(
+        (issue_entry_id_issue[0].fu == ariane_pkg::CVXIF) &&
+        !(x_issue_valid && x_issue_ready)
+      ),
+      .wb_valid_i(wt_valid_ex_id),
+      .wb_slot_i(trans_id_ex_id),
+      .wb_data_i(wbdata_ex_id),
+      .wb_exception_i(dfz_wb_exception),
+      .wb_exception_timing_i(dfz_wb_exception_timing),
+      .wb_cause_i(dfz_wb_cause),
+      .slot_issued_i(dfz_slot_issued),
+      .slot_result_valid_i(dfz_slot_result_valid),
+      .slot_exception_i(dfz_slot_exception),
+      .slot_pc_i(dfz_slot_pc),
+      .slot_fu_i(dfz_slot_fu),
+      .slot_op_i(dfz_slot_op),
+      .commit_ack_i(commit_ack_commit_id),
+      .commit_drop_i(commit_drop_id_commit),
+      .commit_slot_i(dfz_commit_slot),
+      .commit_pc_i(dfz_commit_pc),
+      .commit_data_i(dfz_commit_data),
+      .trap_valid_i(ex_commit.valid),
+      .trap_slot_i(commit_instr_id_commit[0].trans_id),
+      .trap_pc_i(commit_instr_id_commit[0].pc),
+      .trap_cause_i(ex_commit.cause),
+      .trap_tval_i(ex_commit.tval),
+      .flush_if_i(flush_ctrl_if),
+      .flush_unissued_i(flush_unissued_instr_ctrl_id),
+      .flush_sb_i(flush_ctrl_id),
+      .flush_reason_i(dfz_flush_reason)
+  );
+
+  // G0 is deliberately scoped to the current scalar target.  Macro-expanded
+  // instructions need an additional one-fetch-to-many-uop lineage layer.
+  initial begin
+    assert (CVA6Cfg.NrIssuePorts == 1 && !CVA6Cfg.SuperscalarEn)
+    else $fatal(1, "DFZ G0 monitor currently requires scalar CVA6 issue");
+    assert (!CVA6Cfg.RVZCMP && !CVA6Cfg.RVZCMT)
+    else $fatal(1, "DFZ G0 monitor does not yet support ZCMP/ZCMT macro expansion");
+    assert (!CVA6Cfg.SdtrigMcontrol6LoadData)
+    else $fatal(1, "DFZ G0 monitor needs explicit owner support for timing triggers");
+  end
+`endif  // DFZ_TRACE
+
   //pragma translate_off
   initial begin
     assert (!(CVA6Cfg.SuperscalarEn && CVA6Cfg.EnableAccelerator))

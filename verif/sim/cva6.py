@@ -487,7 +487,9 @@ def run_test(test, iss_yaml, isa, target, mabi, gcc_opts, iss_opts, output_dir,
   elif test.endswith(".S"):
     test_type = "S"
   elif test.endswith(".o"):
-    test_type = "o"
+      test_type = "o"
+  elif test.endswith(".elf"):
+    test_type = "elf"
   else:
     sys.exit("Unknown test extension!")
 
@@ -497,7 +499,7 @@ def run_test(test, iss_yaml, isa, target, mabi, gcc_opts, iss_opts, output_dir,
   test = re.sub(r"^.*\/", "", test_path)
   test = re.sub(rf"\.{test_type}$", "", test)
   prefix = (f"{output_dir}/directed_tests/{test}")
-  if test_type == "o":
+  if test_type in ("o", "elf"):
     elf = test_path
   else:
     elf = prefix + ".o"
@@ -505,7 +507,7 @@ def run_test(test, iss_yaml, isa, target, mabi, gcc_opts, iss_opts, output_dir,
   iss_list = iss_opts.split(",")
   run_cmd("mkdir -p %s/directed_tests" % output_dir)
 
-  if test_type != "o":
+  if test_type not in ("o", "elf"):
     # gcc compilation
     logging.info("Compiling test: %s" % test_path)
     if "veri-testharness-pk" not in iss_list:

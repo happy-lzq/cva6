@@ -43,6 +43,7 @@
 #include <fesvr/htif_hexwriter.h>
 #include <fesvr/elfloader.h>
 #include "remote_bitbang.h"
+#include "dpi/dfz_trace.h"
 
 // This software is heavily based on Rocket Chip
 // Checkout this awesome project:
@@ -53,7 +54,9 @@
 // allow modulus.  You can also use a double, if you wish.
 static vluint64_t main_time = 0;
 
-static const char *verilog_plusargs[] = {"jtag_rbb_enable", "time_out", "debug_disable"};
+static const char *verilog_plusargs[] = {
+  "jtag_rbb_enable", "time_out", "debug_disable", "dfz_trace_file", nullptr
+};
 
 extern dtm_t* dtm;
 extern remote_bitbang_t * jtag;
@@ -396,6 +399,11 @@ done_processing:
   } else {
     fprintf(stderr, "%s *** SUCCESS *** (tohost = 0) after %ld cycles\n", htif_argv[1], main_time);
   }
+
+  // SystemVerilog final blocks emit positive CENSORED evidence for any
+  // trace-visible resident.  Keep the DPI file open until those callbacks end.
+  top->final();
+  v_dfz_trace_close();
 
   if (dtm) delete dtm;
   if (jtag) delete jtag;
