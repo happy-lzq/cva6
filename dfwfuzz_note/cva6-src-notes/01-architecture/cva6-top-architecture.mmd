@@ -1,0 +1,92 @@
+flowchart TB
+    classDef fe fill:#E8F1FF,stroke:#3A6EA5,stroke-width:1.5px,color:#0B1F33;
+    classDef mid fill:#EAFBF1,stroke:#2E7D5C,stroke-width:1.5px,color:#0A2D1F;
+    classDef be fill:#FFF2E6,stroke:#D77A17,stroke-width:1.5px,color:#3E2206;
+    classDef mem fill:#F5F0FF,stroke:#6F4BBF,stroke-width:1.5px,color:#20133D;
+    classDef ctrl fill:#FFF0F0,stroke:#C85353,stroke-width:1.5px,color:#3C1313;
+    classDef arch fill:#EEF7F2,stroke:#558A68,stroke-width:1.5px,color:#1E352A;
+
+    subgraph TOP[Top-level CVA6 core]
+        subgraph FE[Frontend: fetch / predict / pcgen]
+            PC[PC Generation\nBTB / BHT / RAS]
+            ICACHE[Instruction Cache\nICache Access]
+            REALIGN[Instr Re-align\nDecode-ready fetch data]
+            FIFO[Instruction Queue\nfetch_entry -> ID]
+        end
+
+        subgraph DECODE[Decode / ID stage]
+            ID[ID Stage\ncompressed decode\ncontrol-flow decode]
+            DECODEOUT[scoreboard_entry_t\nissue_entry_o]
+        end
+
+        subgraph ISSUE[Issue / scoreboard / hazard control]
+            SB[Scoreboard\ntrans_id / issue_pointer / commit_pointer]
+            IRO[Issue Read Operands\nRAW / WAW / structural hazards]
+            ISSUEOUT[Issue to EX\nfu_data / valid / operands]
+        end
+
+        subgraph EX[Execute stage]
+            FU[Functional Units\nALU / BRANCH / MULT / LSU / FPU / CSR / CVXIF]
+            LSU[Load/Store Unit\nTLB / MMU / DCache interface]
+            RESOLVE[Branch Resolve\nresolved_branch_o]
+        end
+
+        subgraph BACK[Commit / control]
+            COMMIT[Commit Stage\narchitectural state update]
+            CTRL[Controller\nflush / halt / fence / trap]
+            CSR[CSR Regfile\nprivilege / trap / debug]
+        end
+
+        subgraph MEM[Memory hierarchy]
+            DCACHE[Data Cache / Write Buffer]
+            MMU[MMU / TLB / PTW]
+            NOC[System interconnect\nmemory / bus]
+        end
+    end
+
+    BOOT[boot_addr_i] --> PC
+    PC --> ICACHE
+    ICACHE --> REALIGN
+    REALIGN --> FIFO
+    FIFO --> ID
+    ID --> DECODEOUT
+    DECODEOUT --> SB
+    SB --> IRO
+    IRO --> ISSUEOUT
+    ISSUEOUT --> FU
+    FU --> RESOLVE
+    RESOLVE -->|mispredict / fixup| PC
+    RESOLVE -->|branch result| SB
+    FU -->|load/store result| LSU
+    LSU -->|mem request| DCACHE
+    DCACHE --> MMU
+    MMU --> NOC
+    NOC --> ICACHE
+    NOC --> DCACHE
+
+    ISSUEOUT -->|FU data + operand| LSU
+    ISSUEOUT -->|FU data + operand| FU
+
+    FU -->|writeback / exception| SB
+    SB -->|commit candidate| COMMIT
+    COMMIT -->|GPR/FPR/CSR update| ARCH[Architectural state]
+    COMMIT -->|fence / sfence / trap| CTRL
+    CTRL -->|flush_if / flush_id / flush_ex| PC
+    CTRL -->|flush_unissued_instr| SB
+    CTRL -->|halt / fence state| FE
+    CSR -->|trap / eret / debug| PC
+    CSR -->|exception info| COMMIT
+    CSR -->|privilege / mmu / csr side effect| FU
+    CSR -->|csr control| CTRL
+
+    EXCEPTION[Exception / interrupt / debug] --> CSR
+    EXCEPTION --> CTRL
+    CTRL -->|flush / suppress| ID
+    CTRL -->|flush / suppress| FU
+
+    class PC,ICACHE,REALIGN,FIFO fe;
+    class ID,DECODEOUT,SB,IRO,ISSUEOUT mid;
+    class FU,LSU,RESOLVE,COMMIT be;
+    class DCACHE,MMU,NOC mem;
+    class CTRL,CSR ctrl;
+    class ARCH arch;
