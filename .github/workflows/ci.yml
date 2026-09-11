@@ -4,7 +4,11 @@
 
 # Run functional regression checks
 name: ci
-on: [push, pull_request]
+on:
+  push:
+    branches-ignore:
+      - cva6-deepflowfuzz
+  pull_request:
 
 jobs:
   build-riscv-tests:
